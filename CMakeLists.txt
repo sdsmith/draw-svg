@@ -127,6 +127,8 @@ if(WIN32)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${MSVC_CXX_FLAGS}")
     add_definitions(-D_USE_MATH_DEFINES)
 
+    set(VS_STARTUP_PROJECT "${PROJECT_NAME}")
+
   endif(MSVC)
 
   if(MINGW)
