@@ -1,5 +1,6 @@
 #include "software_renderer.h"
 
+#include <cassert>
 #include <cmath>
 #include <vector>
 #include <iostream>
@@ -11,12 +12,15 @@ using namespace std;
 
 namespace CS248 {
 
+	int nearest_pixel(float v) {
+		return static_cast<int>(floor(v));
+	}
 
 	// Implements SoftwareRenderer //
 
 	// fill a sample location with color
 	void SoftwareRendererImp::fill_sample(int sx, int sy, const Color& color) {
-
+		this->sample_buffer.set(sx, sy, color);
 	}
 
 	// fill samples in the entire pixel specified by pixel coordinates
@@ -27,6 +31,9 @@ namespace CS248 {
 		// check bounds
 		if (!is_valid_target_pixel(x, y)) return;
 
+		this->sample_buffer.set_pixel(x, y, color);
+
+		/*
 		Color pixel_color;
 		float inv255 = 1.0 / 255.0;
 		pixel_color.r = render_target[4 * (x + y * target_w)] * inv255;
@@ -40,13 +47,16 @@ namespace CS248 {
 		render_target[4 * (x + y * target_w) + 1] = (uint8_t)(pixel_color.g * 255);
 		render_target[4 * (x + y * target_w) + 2] = (uint8_t)(pixel_color.b * 255);
 		render_target[4 * (x + y * target_w) + 3] = (uint8_t)(pixel_color.a * 255);
-
+		*/
 	}
 
 	void SoftwareRendererImp::draw_svg(SVG& svg) {
 
 		// set top level transformation
 		transformation = canvas_to_screen;
+
+		// clear sample buffer
+		this->sample_buffer.clear(Color(255, 255, 255, 255));
 
 		// draw all elements
 		for (size_t i = 0; i < svg.elements.size(); ++i) {
@@ -66,15 +76,15 @@ namespace CS248 {
 
 		// resolve and send to render target
 		resolve();
-
 	}
 
 	void SoftwareRendererImp::set_sample_rate(size_t sample_rate) {
-
-		// Task 2: 
-		// You may want to modify this for supersampling support
 		this->sample_rate = sample_rate;
-
+		
+		// TODO: Because of code bs, have to check that they are set
+		if (target_h != 0 && target_w != 0) {
+			this->sample_buffer = SampleBuffer(target_h, target_w, sample_rate);
+		}
 	}
 
 	void SoftwareRendererImp::set_render_target(unsigned char* render_target,
@@ -85,7 +95,11 @@ namespace CS248 {
 		this->render_target = render_target;
 		this->target_w = width;
 		this->target_h = height;
-
+		
+		// TODO: Because of code bs, have to check it is set
+		if (sample_rate != 0) {
+			this->sample_buffer = SampleBuffer(target_h, target_w, sample_rate);
+		}
 	}
 
 	void SoftwareRendererImp::draw_element(SVGElement* element) {
@@ -128,18 +142,14 @@ namespace CS248 {
 	// Primitive Drawing //
 
 	void SoftwareRendererImp::draw_point(Point& point) {
-
 		Vector2D p = transform(point.position);
 		rasterize_point(p.x, p.y, point.style.fillColor);
-
 	}
 
 	void SoftwareRendererImp::draw_line(Line& line) {
-
 		Vector2D p0 = transform(line.from);
 		Vector2D p1 = transform(line.to);
 		rasterize_line(p0.x, p0.y, p1.x, p1.y, line.style.strokeColor);
-
 	}
 
 	void SoftwareRendererImp::draw_polyline(Polyline& polyline) {
@@ -253,10 +263,6 @@ namespace CS248 {
 	// The input arguments in the rasterization functions 
 	// below are all defined in screen space coordinates
 
-	int nearest_pixel(float v) {
-		return static_cast<int>(floor(v));
-	}
-
 	void SoftwareRendererImp::rasterize_point(float x, float y, Color color) {
 
 		// fill in the nearest pixel
@@ -266,13 +272,17 @@ namespace CS248 {
 		// check bounds
 		if (!is_valid_target_pixel(sx, sy)) return;
 
+		// TODO: fill_sample vs fill_pixel? Depends if you want points very visible or not.
+		fill_pixel(sx, sy, color);
+
+		/*
 		// fill sample - NOT doing alpha blending!
 		// TODO: Call fill_pixel here to run alpha blending
 		render_target[4 * (sx + sy * target_w)] = (uint8_t)(color.r * 255);
 		render_target[4 * (sx + sy * target_w) + 1] = (uint8_t)(color.g * 255);
 		render_target[4 * (sx + sy * target_w) + 2] = (uint8_t)(color.b * 255);
 		render_target[4 * (sx + sy * target_w) + 3] = (uint8_t)(color.a * 255);
-
+		*/
 	}
 
 	void SoftwareRendererImp::rasterize_line(float x0, float y0,
@@ -283,17 +293,6 @@ namespace CS248 {
 		ref->rasterize_line_helper(x0, y0, x1, y1, target_w, target_h, color, this);
 
 	}
-
-	namespace Primitive
-	{
-		struct Point {
-			float x, y;
-
-			friend Vector2D operator-(const Primitive::Point& p0, const Primitive::Point& p1) {
-				return Vector2D(static_cast<double>(p0.x) - p1.x, static_cast<double>(p0.y) - p1.y);
-			}
-		};
-	};
 
 	Vector2D create_tangent(const Primitive::Point& p0, const Primitive::Point& p1) {
 		return Vector2D(static_cast<double>(p1.x) - p0.x, static_cast<double>(p1.y) - p0.y);
@@ -328,6 +327,10 @@ namespace CS248 {
 		return l0 >= 0 && l1 >= 0 && l2 >= 0;
 	}
 
+	float SoftwareRendererImp::get_sample_offset() const {
+		return 1.0f / this->sample_rate;
+	}
+
 	void SoftwareRendererImp::rasterize_triangle(float x0, float y0,
 		float x1, float y1,
 		float x2, float y2,
@@ -347,13 +350,27 @@ namespace CS248 {
 		x_min = max(x_min, 0);
 		y_min = max(y_min, 0);
 
-		for (float y = y_min + 0.5f; y < y_max; ++y) {
-			for (float x = x_min + 0.5f; x < x_max; ++x) {
+		// TODO: check based on sample rate, not pixels
+
+		const float sample_offset = get_sample_offset();
+		const float initial_sample_offset = sample_offset / sample_rate;
+		for (float y = y_min + initial_sample_offset; y < y_max; y += sample_offset) {
+			for (float x = x_min + initial_sample_offset; x < x_max; x += sample_offset) {
 				if (inside_triangle({ x0, y0 }, { x1, y1 }, { x2, y2 }, { x, y })) {
-					rasterize_point(x, y, color);
+					fill_sample(x, y, color);
 				}
 			}
 		}
+
+		/*
+		for (float y = y_min + 0.5f; y < y_max; ++y) {
+			for (float x = x_min + 0.5f; x < x_max; ++x) {
+				if (inside_triangle({ x0, y0 }, { x1, y1 }, { x2, y2 }, { x, y })) {
+					fill_sample(x, y, color);
+				}
+			}
+		}
+		*/
 	}
 
 	void SoftwareRendererImp::rasterize_image(float x0, float y0,
@@ -364,12 +381,27 @@ namespace CS248 {
 
 	}
 
+	void SoftwareRendererImp::set_render_target_pixel(size_t x, size_t y, const Color& color) {
+		render_target[4 * (x + y * target_w) + 0] = static_cast<uint8_t>(color.r * 255);
+		render_target[4 * (x + y * target_w) + 1] = static_cast<uint8_t>(color.g * 255);
+		render_target[4 * (x + y * target_w) + 2] = static_cast<uint8_t>(color.b * 255);
+		render_target[4 * (x + y * target_w) + 3] = static_cast<uint8_t>(color.a * 255);
+	}
+
 	// resolve samples to render target
 	void SoftwareRendererImp::resolve(void) {
 
 		// Task 2: 
 		// Implement supersampling
 		// You may also need to modify other functions marked with "Task 2".
+
+		for (size_t y = 0; y < target_h; ++y) {
+			for (size_t x = 0; x < target_w; ++x) {
+				// TODO: Alpha blending
+				set_render_target_pixel(x, y, this->sample_buffer.resolve_pixel(x, y));
+			}
+		}
+
 		return;
 
 	}

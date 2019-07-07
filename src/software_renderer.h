@@ -13,6 +13,7 @@
 #include "CS248.h"
 #include "texture.h"
 #include "svg_renderer.h"
+#include <cassert>
 
 namespace CS248 { // CS248
 
@@ -65,7 +66,7 @@ class SoftwareRenderer : public SVGRenderer {
   unsigned char* render_target; 
 
   // Target buffer dimension (in pixels)
-  size_t target_w; size_t target_h;
+  size_t target_w = 0; size_t target_h = 0;
 
   // Texture sampler being used
   Sampler2D* sampler;
@@ -75,11 +76,113 @@ class SoftwareRenderer : public SVGRenderer {
 
 }; // class SoftwareRenderer
 
+namespace Primitive
+{
+	struct Point {
+		float x, y;
+
+		friend Vector2D operator-(const Primitive::Point& p0, const Primitive::Point& p1) {
+			return Vector2D(static_cast<double>(p0.x) - p1.x, static_cast<double>(p0.y) - p1.y);
+		}
+	};
+};
+
+// TODO: better spot
+int nearest_pixel(float v);
+
+class FrameBuffer {
+public:
+	FrameBuffer() = default;
+	FrameBuffer(size_t w, size_t h) : h(h), w(w) {
+		buf.resize(h * w, Color(255, 255, 255, 255));
+	}
+
+	void set(size_t x, size_t y, const Color& color) {
+		buf[buf_pos(x, y)] = color;
+	}
+
+	Color get(size_t x, size_t y) const {
+		return buf[buf_pos(x, y)];
+	}
+
+protected:
+	size_t h;
+	size_t w;
+	std::vector<Color> buf;
+
+	size_t buf_pos(size_t x, size_t y) const {
+		const size_t i = y * w + x;
+		assert(i < buf.size());
+		return i;
+	}
+
+	size_t buf_pos(const Primitive::Point& pixel) const {
+		const size_t i = static_cast<size_t>(nearest_pixel(pixel.y)) * w + static_cast<size_t>(nearest_pixel(pixel.x));
+		assert(i < buf.size());
+		return i;
+	}
+};
+
+class SampleBuffer : public FrameBuffer {
+public:
+	SampleBuffer() = default;
+
+	/**
+	 * \param sample_rate Number of samples per axis. Ie. 2 => 4 samples, 4 => 16 samples.
+	 */
+	SampleBuffer(size_t w, size_t h, size_t sample_rate) 
+		: FrameBuffer(h * sample_rate, w * sample_rate), sample_rate(sample_rate) {}
+
+	void clear(const Color& color) {
+		std::fill(buf.begin(), buf.end(), color);
+	}
+
+	void set_sample_rate(size_t sample_rate) {
+		this->sample_rate = sample_rate;
+	}
+
+	void set_target_dim(size_t w, size_t h) {
+		this->h = h;
+		this->w = w;
+	}
+
+	/**
+	 * \brief Sets values for a full pixel.
+	 */
+	void set_pixel(size_t pixel_x, size_t pixel_y, const Color& color) {
+		for (size_t y = pixel_y * sample_rate; y < (pixel_y + 1) * sample_rate; ++y) {
+			for (size_t x = pixel_x * sample_rate; x < (pixel_x + 1) * sample_rate; ++x) {
+				set(x, y, color);
+			}
+		}
+	}
+
+	/**
+	 * Resolves the value for a pixel.
+	 */
+	Color resolve_pixel(size_t pixel_x, size_t pixel_y) {
+		Color col;
+
+		for (size_t y = pixel_y * sample_rate; y < (pixel_y + 1) * sample_rate; ++y) {
+			for (size_t x = pixel_x * sample_rate; x < (pixel_x + 1) * sample_rate; ++x) {
+				col += get(x, y);
+			}
+		}
+
+		col /= sample_rate * sample_rate;
+		return col;
+	}
+
+protected:
+	size_t sample_rate = 1;
+	bool sample_rate_set = false;
+	bool target_dim_set = false;
+};
 
 class SoftwareRendererImp : public SoftwareRenderer {
 public:
 
-	SoftwareRendererImp(SoftwareRendererRef *ref = NULL) : SoftwareRenderer(), ref(ref) { }
+	SoftwareRendererImp(SoftwareRendererRef *ref = nullptr) : SoftwareRenderer(), ref(ref) {}
 
 	// draw an svg input to render target
 	void draw_svg(SVG& svg);
@@ -91,13 +194,15 @@ public:
 	void set_render_target(unsigned char* target_buffer,
 		size_t width, size_t height);
 
-	std::vector<unsigned char> sample_buffer; int w; int h;
+	SampleBuffer sample_buffer;
+	int w; int h;
 	void fill_sample(int sx, int sy, const Color& color);
 	void fill_pixel(int x, int y, const Color& color);
 
-	bool is_valid_target_pixel(int x, int y) const;
-
 private:
+	float get_sample_offset() const;
+	bool is_valid_target_pixel(int x, int y) const;
+	void set_render_target_pixel(size_t x, size_t y, const Color& color);
 
 	// Primitive Drawing //
 

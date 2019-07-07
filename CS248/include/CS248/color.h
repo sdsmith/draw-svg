@@ -74,6 +74,11 @@ class Color {
     return *this;
   }
 
+  inline Color& operator/=(float s) {
+	  r /= s; g /= s; b /= s; a /= s;
+	  return *this;
+  }
+
   // comparison
   inline bool operator==( const Color& rhs ) const {
     return r == rhs.r && g == rhs.g && b == rhs.b && a == rhs.a;
@@ -99,7 +104,6 @@ class Color {
    * \return the hexadecimal encoding of the color.
    */
   std::string toHex( ) const;
-
 
 }; // class Color
 
