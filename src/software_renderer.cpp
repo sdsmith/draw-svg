@@ -12,6 +12,8 @@ using namespace std;
 
 namespace CS248 {
 
+
+
 	int nearest_pixel(float v) {
 		return static_cast<int>(floor(v));
 	}
@@ -25,6 +27,8 @@ namespace CS248 {
 
 	// fill samples in the entire pixel specified by pixel coordinates
 	void SoftwareRendererImp::fill_pixel(int x, int y, const Color& color) {
+
+		// TODO: Colors come in the range of [0,1]!
 
 		// Task 2: Re-implement this function
 
@@ -83,7 +87,7 @@ namespace CS248 {
 		
 		// TODO: Because of code bs, have to check that they are set
 		if (target_h != 0 && target_w != 0) {
-			this->sample_buffer = SampleBuffer(target_h, target_w, sample_rate);
+			this->sample_buffer = SampleBuffer(ref, target_h, target_w, sample_rate);
 		}
 	}
 
@@ -98,7 +102,7 @@ namespace CS248 {
 		
 		// TODO: Because of code bs, have to check it is set
 		if (sample_rate != 0) {
-			this->sample_buffer = SampleBuffer(target_h, target_w, sample_rate);
+			this->sample_buffer = SampleBuffer(ref, target_h, target_w, sample_rate);
 		}
 	}
 
@@ -308,6 +312,7 @@ namespace CS248 {
 	 * \return >0 if inside, <0 if outside, 0 if on the line.
 	 */
 	float line_test(Primitive::Point p0, Primitive::Point p1, Primitive::Point px) {
+		// TODO: use barycentric coords
 		return -(px.x - p0.x) * (p1.y - p0.y) + (px.y - p0.y) * (p1.x - p0.x);
 	}
 
@@ -327,14 +332,15 @@ namespace CS248 {
 		return l0 >= 0 && l1 >= 0 && l2 >= 0;
 	}
 
-	float SoftwareRendererImp::get_sample_offset() const {
+	float SoftwareRendererImp::get_sample_viewport_offset() const {
 		return 1.0f / this->sample_rate;
 	}
 
 	void SoftwareRendererImp::rasterize_triangle(float x0, float y0,
 		float x1, float y1,
 		float x2, float y2,
-		Color color) {
+		Color color) 
+	{
 		// Task 1: 
 		// Implement triangle rasterization (you may want to call fill_sample here)
 
@@ -350,27 +356,37 @@ namespace CS248 {
 		x_min = max(x_min, 0);
 		y_min = max(y_min, 0);
 
-		// TODO: check based on sample rate, not pixels
-
-		const float sample_offset = get_sample_offset();
-		const float initial_sample_offset = sample_offset / sample_rate;
-		for (float y = y_min + initial_sample_offset; y < y_max; y += sample_offset) {
-			for (float x = x_min + initial_sample_offset; x < x_max; x += sample_offset) {
-				if (inside_triangle({ x0, y0 }, { x1, y1 }, { x2, y2 }, { x, y })) {
-					fill_sample(x, y, color);
-				}
-			}
-		}
-
 		/*
-		for (float y = y_min + 0.5f; y < y_max; ++y) {
-			for (float x = x_min + 0.5f; x < x_max; ++x) {
+		 * Track the viewport position for bounds check and the corresponding 
+		 * sample position for populating the samples.
+		 */
+		const float sample_offset = get_sample_viewport_offset();
+		const float initial_sample_offset = sample_offset / sample_rate;
+	
+		float y = y_min + sample_offset;
+		size_t sy = y_min * sample_rate;
+
+		const float x_start = x_min + sample_offset;
+		const size_t sx_start = x_min * sample_rate;
+		
+		float x;
+		size_t sx;
+		while (y < y_max) {
+			x = x_start;
+			sx = x_min * sample_rate;
+			while (x < x_max) {
+
 				if (inside_triangle({ x0, y0 }, { x1, y1 }, { x2, y2 }, { x, y })) {
-					fill_sample(x, y, color);
+					fill_sample(sx, sy, color);
 				}
+
+				x += sample_offset;
+				++sx;
 			}
+
+			y += sample_offset;
+			++sy;
 		}
-		*/
 	}
 
 	void SoftwareRendererImp::rasterize_image(float x0, float y0,
@@ -397,7 +413,6 @@ namespace CS248 {
 
 		for (size_t y = 0; y < target_h; ++y) {
 			for (size_t x = 0; x < target_w; ++x) {
-				// TODO: Alpha blending
 				set_render_target_pixel(x, y, this->sample_buffer.resolve_pixel(x, y));
 			}
 		}
@@ -406,5 +421,90 @@ namespace CS248 {
 
 	}
 
+
+
+	/**
+	* Resolves the value for a pixel.
+	*/
+
+
+	/**
+	* \brief Sets values for a full pixel.
+	*/
+
+
+	/**
+	* \param sample_rate Number of samples per axis. Ie. 2 => 4 samples, 4 => 16 samples.
+	*/
+
+	inline SampleBuffer::SampleBuffer(SoftwareRendererRef* ref, size_t w, size_t h, size_t sample_rate)
+		: FrameBuffer(ref, h* sample_rate, w* sample_rate), sample_rate(sample_rate) {}
+
+	inline void SampleBuffer::clear(const Color& color) {
+		std::fill(buf.begin(), buf.end(), color);
+	}
+
+	inline void SampleBuffer::set_sample_rate(size_t sample_rate) {
+		this->sample_rate = sample_rate;
+	}
+
+	inline void SampleBuffer::set_target_dim(size_t w, size_t h) {
+		this->h = h;
+		this->w = w;
+	}
+
+	inline void SampleBuffer::set_pixel(size_t pixel_x, size_t pixel_y, const Color& color) {
+		for (size_t y = pixel_y * sample_rate; y < (pixel_y + 1) * sample_rate; ++y) {
+			for (size_t x = pixel_x * sample_rate; x < (pixel_x + 1) * sample_rate; ++x) {
+				set(x, y, color);
+			}
+		}
+	}
+
+	inline Color SampleBuffer::resolve_pixel(size_t pixel_x, size_t pixel_y) {
+		Color col;
+
+		for (size_t y = pixel_y * sample_rate; y < (pixel_y + 1) * sample_rate; ++y) {
+			for (size_t x = pixel_x * sample_rate; x < (pixel_x + 1) * sample_rate; ++x) {
+				col += get(x, y);
+			}
+		}
+
+		col /= sample_rate * sample_rate;
+		if (col.r > 1.0f) { col.r = 1.0f; }
+		if (col.b > 1.0f) { col.b = 1.0f; }
+		if (col.g > 1.0f) { col.g = 1.0f; }
+		if (col.a > 1.0f) { col.a = 1.0f; }
+
+		return col;
+	}
+
+	inline FrameBuffer::FrameBuffer(SoftwareRendererRef* ref, size_t w, size_t h) : ref(ref), h(h), w(w) {
+		buf.resize(h * w, Color(1, 1, 1, 1)); // TODO: color is expected to be 255 in buffer, but [0,1] when in color
+	}
+
+	inline void FrameBuffer::set(size_t x, size_t y, const Color& color) {
+		constexpr float inv255 = 1.0f / 255.0f;
+
+		Color pixel_col = get(x, y);// * inv255;
+		pixel_col = ref->alpha_blending_helper(pixel_col, color);
+		buf[buf_pos(x, y)] = color;
+	}
+
+	inline Color FrameBuffer::get(size_t x, size_t y) const {
+		return buf[buf_pos(x, y)];
+	}
+
+	inline size_t FrameBuffer::buf_pos(size_t x, size_t y) const {
+		const size_t i = y * w + x;
+		assert(i < buf.size());
+		return i;
+	}
+
+	inline size_t FrameBuffer::buf_pos(const Primitive::Point& pixel) const {
+		const size_t i = static_cast<size_t>(nearest_pixel(pixel.y)) * w + static_cast<size_t>(nearest_pixel(pixel.x));
+		assert(i < buf.size());
+		return i;
+	}
 
 } // namespace CS248

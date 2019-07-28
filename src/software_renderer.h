@@ -90,37 +90,32 @@ namespace Primitive
 // TODO: better spot
 int nearest_pixel(float v);
 
+/*
+Color alpha_blend(const Color& buffer_pixel, const Color& new_pixel) {
+	
+}
+*/
+
+// TODO: remove dependency on SoftwareRendererRef
 class FrameBuffer {
 public:
 	FrameBuffer() = default;
-	FrameBuffer(size_t w, size_t h) : h(h), w(w) {
-		buf.resize(h * w, Color(255, 255, 255, 255));
-	}
+	FrameBuffer(SoftwareRendererRef* ref) : ref(ref) {}
+	FrameBuffer(SoftwareRendererRef* ref, size_t w, size_t h);
 
-	void set(size_t x, size_t y, const Color& color) {
-		buf[buf_pos(x, y)] = color;
-	}
+	void set(size_t x, size_t y, const Color& color);
 
-	Color get(size_t x, size_t y) const {
-		return buf[buf_pos(x, y)];
-	}
+	Color get(size_t x, size_t y) const;
 
 protected:
-	size_t h;
-	size_t w;
+	SoftwareRendererRef* ref = nullptr;
+	size_t h = 0;
+	size_t w = 0;
 	std::vector<Color> buf;
 
-	size_t buf_pos(size_t x, size_t y) const {
-		const size_t i = y * w + x;
-		assert(i < buf.size());
-		return i;
-	}
+	size_t buf_pos(size_t x, size_t y) const;
 
-	size_t buf_pos(const Primitive::Point& pixel) const {
-		const size_t i = static_cast<size_t>(nearest_pixel(pixel.y)) * w + static_cast<size_t>(nearest_pixel(pixel.x));
-		assert(i < buf.size());
-		return i;
-	}
+	size_t buf_pos(const Primitive::Point& pixel) const;
 };
 
 class SampleBuffer : public FrameBuffer {
@@ -130,48 +125,23 @@ public:
 	/**
 	 * \param sample_rate Number of samples per axis. Ie. 2 => 4 samples, 4 => 16 samples.
 	 */
-	SampleBuffer(size_t w, size_t h, size_t sample_rate) 
-		: FrameBuffer(h * sample_rate, w * sample_rate), sample_rate(sample_rate) {}
+	SampleBuffer(SoftwareRendererRef* ref, size_t w, size_t h, size_t sample_rate);
 
-	void clear(const Color& color) {
-		std::fill(buf.begin(), buf.end(), color);
-	}
+	void clear(const Color& color);
 
-	void set_sample_rate(size_t sample_rate) {
-		this->sample_rate = sample_rate;
-	}
+	void set_sample_rate(size_t sample_rate);
 
-	void set_target_dim(size_t w, size_t h) {
-		this->h = h;
-		this->w = w;
-	}
+	void set_target_dim(size_t w, size_t h);
 
 	/**
 	 * \brief Sets values for a full pixel.
 	 */
-	void set_pixel(size_t pixel_x, size_t pixel_y, const Color& color) {
-		for (size_t y = pixel_y * sample_rate; y < (pixel_y + 1) * sample_rate; ++y) {
-			for (size_t x = pixel_x * sample_rate; x < (pixel_x + 1) * sample_rate; ++x) {
-				set(x, y, color);
-			}
-		}
-	}
+	void set_pixel(size_t pixel_x, size_t pixel_y, const Color& color);
 
 	/**
 	 * Resolves the value for a pixel.
 	 */
-	Color resolve_pixel(size_t pixel_x, size_t pixel_y) {
-		Color col;
-
-		for (size_t y = pixel_y * sample_rate; y < (pixel_y + 1) * sample_rate; ++y) {
-			for (size_t x = pixel_x * sample_rate; x < (pixel_x + 1) * sample_rate; ++x) {
-				col += get(x, y);
-			}
-		}
-
-		col /= sample_rate * sample_rate;
-		return col;
-	}
+	Color resolve_pixel(size_t pixel_x, size_t pixel_y);
 
 protected:
 	size_t sample_rate = 1;
@@ -200,7 +170,7 @@ public:
 	void fill_pixel(int x, int y, const Color& color);
 
 private:
-	float get_sample_offset() const;
+	float get_sample_viewport_offset() const;
 	bool is_valid_target_pixel(int x, int y) const;
 	void set_render_target_pixel(size_t x, size_t y, const Color& color);
 
